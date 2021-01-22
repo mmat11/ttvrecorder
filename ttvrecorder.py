@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -29,7 +30,7 @@ class TTVConfig:
 
 
 class Recorder:
-    CHUNKSIZE = 2048
+    CHUNKSIZE = 1024
 
     class State(Enum):
         INITIALIZING = 0
@@ -39,14 +40,17 @@ class Recorder:
     def __init__(self, channel: str, output_folder: str, quality: str):
         self.channel = channel
         self.quality = quality
-        self.session = Streamlink(options={
-            "ffmpeg-ffmpeg": "/usr/bin/ffmpeg",
-            "ffmpeg-video-transcode": "h264",
-            "ffmpeg-audio-transcode": "aac",
-            "ffmpeg-fout": "mp4",
-            "ffmpeg-verbose": True,
+        self.session = Streamlink(
+            options={
+                "ffmpeg-ffmpeg": "/usr/bin/ffmpeg",
+                "ffmpeg-video-transcode": "h264",
+                "ffmpeg-audio-transcode": "aac",
+                "ffmpeg-fout": "webm",
+                "ffmpeg-verbose": True,
+            }
+        )
 
-        })
+        self.q = deque([])
         self.stopper = threading.Event()
 
         self.state = Recorder.State.INITIALIZING
@@ -62,10 +66,11 @@ class Recorder:
             self.quality
         ].open()
 
-        with open(self.fullpath, "wb") as f:
-            while not self.stopper.is_set():
-                data = fd.read(Recorder.CHUNKSIZE)
-                f.write(data)
+        file_writer = threading.Thread(target=self.file_writer)
+        file_writer.start()
+
+        while not self.stopper.is_set():
+            self.q.append(fd.read(Recorder.CHUNKSIZE))
 
         self.state = Recorder.State.STOPPED
 
@@ -81,10 +86,17 @@ class Recorder:
 
         self.stopper = threading.Event()
 
+    def file_writer(self):
+        with open(self.fullpath, "wb") as f:
+            while self.state == Recorder.State.RUNNING:
+                if self.q:
+                    data = self.q.popleft()
+                    f.write(data)
+
     @property
     def filename(self) -> str:
         dt = datetime.now().strftime("%d-%m-%Y_%H-%M")
-        return f"{self.channel}_{dt}.mp4"
+        return f"{self.channel}_{dt}.webm"
 
     @property
     def fullpath(self) -> str:
