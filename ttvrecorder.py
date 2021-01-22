@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import subprocess
 import threading
 import time
 from collections import deque
@@ -30,7 +31,7 @@ class TTVConfig:
 
 
 class Recorder:
-    CHUNKSIZE = 1024
+    CHUNKSIZE = 8192
 
     class State(Enum):
         INITIALIZING = 0
@@ -40,33 +41,40 @@ class Recorder:
     def __init__(self, channel: str, output_folder: str, quality: str):
         self.channel = channel
         self.quality = quality
-        self.session = Streamlink(
-            options={
-                "ffmpeg-ffmpeg": "/usr/bin/ffmpeg",
-                "ffmpeg-video-transcode": "h264",
-                "ffmpeg-audio-transcode": "aac",
-                "ffmpeg-fout": "webm",
-                "ffmpeg-verbose": True,
-            }
-        )
+
+        self.session = Streamlink()
+        self.session.set_plugin_option("twitch", "twitch-disable-hosting", True)
+        self.session.set_plugin_option("twitch", "twitch-disable-ads", True)
+        self.session.set_plugin_option("twitch", "twitch-disable-reruns", True)
+        self.session.set_plugin_option("twitch", "twitch-low-latency", True)
 
         self.q = deque([])
         self.stopper = threading.Event()
 
         self.state = Recorder.State.INITIALIZING
 
+        self.output_folder = None
+        self.current_filename = None
         self.prepare_output_folder(output_folder)
 
     def start(self):
         assert self.state in {Recorder.State.INITIALIZING, Recorder.State.STOPPED}
 
         self.state = Recorder.State.RUNNING
+        self.get_new_filename()
 
         fd = self.session.streams(f"https://twitch.tv/{self.channel}")[
             self.quality
         ].open()
 
-        file_writer = threading.Thread(target=self.file_writer)
+        def _writer(self):
+            with open(self.current_filename, "wb") as f:
+                while self.state == Recorder.State.RUNNING:
+                    if self.q:
+                        data = self.q.popleft()
+                        f.write(data)
+
+        file_writer = threading.Thread(target=_writer, args=(self,))
         file_writer.start()
 
         while not self.stopper.is_set():
@@ -84,23 +92,17 @@ class Recorder:
 
         th.join()
 
+        subprocess.run(
+            ["/usr/bin/ffmpeg", "-i", self.current_filename, self.current_filename[:-5]]
+        )
+        os.remove(self.current_filename)
+
         self.stopper = threading.Event()
 
-    def file_writer(self):
-        with open(self.fullpath, "wb") as f:
-            while self.state == Recorder.State.RUNNING:
-                if self.q:
-                    data = self.q.popleft()
-                    f.write(data)
-
-    @property
-    def filename(self) -> str:
+    def get_new_filename(self):
         dt = datetime.now().strftime("%d-%m-%Y_%H-%M")
-        return f"{self.channel}_{dt}.webm"
-
-    @property
-    def fullpath(self) -> str:
-        return os.path.join(self.output_folder, self.filename)
+        filename = f"{self.channel}_{dt}.mp4.temp"
+        self.current_filename = os.path.join(self.output_folder, filename)
 
     def prepare_output_folder(self, output_folder):
         if not os.path.exists(output_folder):
@@ -108,7 +110,6 @@ class Recorder:
         fp = os.path.join(output_folder, self.channel)
         if not os.path.exists(fp):
             os.mkdir(fp)
-
         self.output_folder = fp
 
 
