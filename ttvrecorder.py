@@ -39,8 +39,14 @@ class Recorder:
     def __init__(self, channel: str, output_folder: str, quality: str):
         self.channel = channel
         self.quality = quality
+        self.session = Streamlink(options={
+            "ffmpeg-ffmpeg": "/usr/bin/ffmpeg",
+            "ffmpeg-video-transcode": "h264",
+            "ffmpeg-audio-transcode": "aac",
+            "ffmpeg-fout": "mp4",
+            "ffmpeg-verbose": True,
 
-        self.session = Streamlink()
+        })
         self.stopper = threading.Event()
 
         self.state = Recorder.State.INITIALIZING
@@ -135,40 +141,32 @@ class Manager:
         raise ChannelNotFound()
 
     def run(self):
-        def loop():
-            while True:
-                is_live = self.is_channel_live()
+        while True:
+            is_live = self.is_channel_live()
 
-                if self.recorder.state in {
-                    Recorder.State.INITIALIZING,
-                    Recorder.State.STOPPED,
-                }:
-                    if is_live:
-                        # the Recorder is not running, start worker thread
-                        logger.info("starting worker thread")
-                        self.worker = threading.Thread(target=self.recorder.start)
-                        self.worker.start()
-                    else:
-                        # do nothing, wait for channel to go live before initializing the Recorder
-                        logger.debug("channel is off, waiting...")
+            if self.recorder.state in {
+                Recorder.State.INITIALIZING,
+                Recorder.State.STOPPED,
+            }:
+                if is_live:
+                    # the Recorder is not running, start worker thread
+                    logger.info("starting worker thread")
+                    self.worker = threading.Thread(target=self.recorder.start)
+                    self.worker.start()
                 else:
-                    assert self.recorder.state == Recorder.State.RUNNING
-                    if is_live:
-                        # do nothing, continue recording
-                        logger.debug("still recording...")
-                    else:
-                        # stop the recording
-                        logger.info("channel went off, stopping the recorder")
-                        self.recorder.stop(self.worker)
+                    # do nothing, wait for channel to go live before initializing the Recorder
+                    logger.debug("channel is off, waiting...")
+            else:
+                assert self.recorder.state == Recorder.State.RUNNING
+                if is_live:
+                    # do nothing, continue recording
+                    logger.debug("still recording...")
+                else:
+                    # stop the recording
+                    logger.info("channel went off, stopping the recorder")
+                    self.recorder.stop(self.worker)
 
-                time.sleep(Manager.POLL_INTERVAL)
-
-        try:
-            loop()
-        except KeyboardInterrupt:
-            logger.info("shutting down...")
-            if self.recorder.state == Recorder.State.RUNNING:
-                self.recorder.stop(self.worker)
+            time.sleep(Manager.POLL_INTERVAL)
 
 
 class ChannelNotFound(Exception):
@@ -210,4 +208,9 @@ if __name__ == "__main__":
     )
     manager = Manager(recorder=rec, ttv_config=ttv_config)
 
-    manager.run()
+    try:
+        manager.run()
+    except KeyboardInterrupt:
+        logger.info("shutting down...")
+        if manager.recorder.state == Recorder.State.RUNNING:
+            manager.recorder.stop(manager.worker)
