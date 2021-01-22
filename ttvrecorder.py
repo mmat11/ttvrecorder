@@ -78,7 +78,7 @@ class Recorder:
     @property
     def filename(self) -> str:
         dt = datetime.now().strftime("%d-%m-%Y_%H-%M")
-        return f"{self.channel}_{dt}.mkv"
+        return f"{self.channel}_{dt}.mp4"
 
     @property
     def fullpath(self) -> str:
@@ -135,32 +135,40 @@ class Manager:
         raise ChannelNotFound()
 
     def run(self):
-        while True:
-            is_live = self.is_channel_live()
+        def loop():
+            while True:
+                is_live = self.is_channel_live()
 
-            if self.recorder.state in {
-                Recorder.State.INITIALIZING,
-                Recorder.State.STOPPED,
-            }:
-                if is_live:
-                    # the Recorder is not running, start worker thread
-                    logger.info("starting worker thread")
-                    self.worker = threading.Thread(target=self.recorder.start)
-                    self.worker.start()
+                if self.recorder.state in {
+                    Recorder.State.INITIALIZING,
+                    Recorder.State.STOPPED,
+                }:
+                    if is_live:
+                        # the Recorder is not running, start worker thread
+                        logger.info("starting worker thread")
+                        self.worker = threading.Thread(target=self.recorder.start)
+                        self.worker.start()
+                    else:
+                        # do nothing, wait for channel to go live before initializing the Recorder
+                        logger.debug("channel is off, waiting...")
                 else:
-                    # do nothing, wait for channel to go live before initializing the Recorder
-                    logger.debug("channel is off, waiting...")
-            else:
-                assert self.recorder.state == Recorder.State.RUNNING
-                if is_live:
-                    # do nothing, continue recording
-                    logger.debug("still recording...")
-                else:
-                    # stop the recording
-                    logger.info("channel went off, stopping the recorder")
-                    self.recorder.stop(self.worker)
+                    assert self.recorder.state == Recorder.State.RUNNING
+                    if is_live:
+                        # do nothing, continue recording
+                        logger.debug("still recording...")
+                    else:
+                        # stop the recording
+                        logger.info("channel went off, stopping the recorder")
+                        self.recorder.stop(self.worker)
 
-            time.sleep(Manager.POLL_INTERVAL)
+                time.sleep(Manager.POLL_INTERVAL)
+
+        try:
+            loop()
+        except KeyboardInterrupt:
+            logger.info("shutting down...")
+            if self.recorder.state == Recorder.State.RUNNING:
+                self.recorder.stop(self.worker)
 
 
 class ChannelNotFound(Exception):
