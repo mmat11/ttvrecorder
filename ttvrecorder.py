@@ -31,7 +31,7 @@ class TTVConfig:
 
 
 class Recorder:
-    CHUNKSIZE = 8192
+    CHUNKSIZE = 4096
 
     class State(Enum):
         INITIALIZING = 0
@@ -70,9 +70,12 @@ class Recorder:
         def _writer(self):
             with open(self.current_filename, "wb") as f:
                 while self.state == Recorder.State.RUNNING:
+                    sleep = 0.1
                     if self.q:
+                        sleep = 0
                         data = self.q.popleft()
                         f.write(data)
+                    time.sleep(sleep)  # do not burn CPU on empty buffer
 
         file_writer = threading.Thread(target=_writer, args=(self,))
         file_writer.start()
@@ -92,19 +95,7 @@ class Recorder:
 
         th.join()
 
-        subprocess.run(
-            [
-                "/usr/bin/ffmpeg",
-                "-i",
-                self.current_filename,
-                "-vcodec",
-                "copy",
-                "-acodec",
-                "copy",
-                self.current_filename.replace(".tmp", ".mp4"),
-            ]
-        )
-        os.remove(self.current_filename)
+        self.process_video()
 
         self.stopper = threading.Event()
 
@@ -117,6 +108,46 @@ class Recorder:
         if not os.path.exists(output_folder):
             os.mkdir(output_folder)
         self.output_folder = output_folder
+
+    @property
+    def thumbnail_name(self):
+        return self.current_filename.replace(".tmp", ".png")
+
+    def process_video(self):
+        #  extract a frame and use it as thumbnail; TODO: attach thumbnail to video
+        subprocess.run(
+            [
+                "/usr/bin/ffmpeg",
+                "-ss",
+                "00:01:00",
+                "-i",
+                self.current_filename,
+                "-vframes",
+                "1",
+                self.thumbnail_name,
+            ]
+        )
+
+        filename = self.current_filename.replace(".tmp", ".mp4")
+
+        #  mpeg2-ts -> mp4, keep h.264-aac, move moov atom at the start
+        subprocess.run(
+            [
+                "/usr/bin/ffmpeg",
+                "-i",
+                self.current_filename,
+                "-vcodec",
+                "copy",
+                "-acodec",
+                "copy",
+                "-movflags",
+                "faststart",
+                filename,
+            ]
+        )
+
+        # remove temp file
+        os.remove(self.current_filename)
 
 
 class Manager:
