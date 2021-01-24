@@ -111,7 +111,7 @@ class Recorder:
 
     @property
     def thumbnail_name(self):
-        return self.current_filename.replace(".tmp", ".png")
+        return self.current_filename.replace(".tmp", ".jpg")
 
     def process_video(self):
         #  extract a frame and use it as thumbnail; TODO: attach thumbnail to video
@@ -128,8 +128,6 @@ class Recorder:
             ]
         )
 
-        filename = self.current_filename.replace(".tmp", ".mp4")
-
         #  mpeg2-ts -> mp4, keep h.264-aac, move moov atom at the start
         subprocess.run(
             [
@@ -142,7 +140,7 @@ class Recorder:
                 "copy",
                 "-movflags",
                 "faststart",
-                filename,
+                self.current_filename.replace(".tmp", ".mp4"),
             ]
         )
 
