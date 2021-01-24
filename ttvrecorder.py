@@ -93,7 +93,16 @@ class Recorder:
         th.join()
 
         subprocess.run(
-            ["/usr/bin/ffmpeg", "-i", self.current_filename, self.current_filename[:-5]]
+            [
+                "/usr/bin/ffmpeg",
+                "-i",
+                self.current_filename,
+                "-vcodec",
+                "copy",
+                "-acodec",
+                "copy",
+                self.current_filename.replace(".tmp", ".mp4"),
+            ]
         )
         os.remove(self.current_filename)
 
@@ -101,16 +110,13 @@ class Recorder:
 
     def get_new_filename(self):
         dt = datetime.now().strftime("%d-%m-%Y_%H-%M")
-        filename = f"{self.channel}_{dt}.mp4.temp"
+        filename = f"{self.channel}_{dt}.tmp"
         self.current_filename = os.path.join(self.output_folder, filename)
 
     def prepare_output_folder(self, output_folder):
         if not os.path.exists(output_folder):
             os.mkdir(output_folder)
-        fp = os.path.join(output_folder, self.channel)
-        if not os.path.exists(fp):
-            os.mkdir(fp)
-        self.output_folder = fp
+        self.output_folder = output_folder
 
 
 class Manager:
