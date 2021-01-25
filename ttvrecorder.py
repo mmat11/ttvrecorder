@@ -114,7 +114,7 @@ class Recorder:
         return self.current_filename.replace(".tmp", ".jpg")
 
     def process_video(self):
-        #  extract a frame and use it as thumbnail; TODO: attach thumbnail to video
+        #  extract a frame and use it as thumbnail
         subprocess.run(
             [
                 "/usr/bin/ffmpeg",
@@ -128,8 +128,8 @@ class Recorder:
             ]
         )
 
-        #  mpeg2-ts -> mp4, keep h.264-aac, move moov atom at the start
-        subprocess.run(
+        #  mpeg2-ts -> mp4, h.264/aac, moov atom at the start
+        p = subprocess.run(
             [
                 "/usr/bin/ffmpeg",
                 "-i",
@@ -144,8 +144,9 @@ class Recorder:
             ]
         )
 
-        # remove temp file
-        os.remove(self.current_filename)
+        if p.returncode == 0:
+            # remove temp file
+            os.remove(self.current_filename)
 
 
 class Manager:
